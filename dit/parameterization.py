@@ -1,12 +1,7 @@
-from flax import linen as nn
-from jax import Array
 from jax import numpy as jnp
 
 
 class EDMParameterization:
-    score_model: nn.Module
-    alpha_schedule: Array
-
     sigma_min: float = 0.002
     sigma_max: float = 80.0
     rho: float = 7.0

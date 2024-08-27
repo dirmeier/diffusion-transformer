@@ -1,8 +1,13 @@
-import jax.lax
 import numpy as np
 from einops import rearrange
 from flax import linen as nn
 from jax import numpy as jnp
+
+from dit.nn.embedding import timestep_embedding
+
+
+def _modulate(inputs, shift, scale):
+    return inputs * (1.0 + scale[:, None]) + shift[:, None]
 
 
 class DiTBlock(nn.Module):
@@ -12,54 +17,35 @@ class DiTBlock(nn.Module):
 
     @nn.compact
     def __call__(self, inputs, context, is_training, **kwargs):
+        hidden = inputs
         adaln_norm = nn.Dense(self.hidden_size * 6)(context)
         attn, gate = jnp.split(adaln_norm, 2, axis=-1)
 
-        hidden = inputs
-        intermediate = nn.LayerNorm()(hidden)
         pre_shift, pre_scale, post_scale = jnp.split(attn, 3, -1)
+        intermediate = nn.LayerNorm(use_scale=False, use_bias=False)(hidden)
         intermediate = _modulate(intermediate, pre_shift, pre_scale)
         intermediate = nn.SelfAttention(num_heads=self.n_heads)(intermediate)
         hidden = hidden + post_scale[:, None] * intermediate
 
-        intermediate = nn.LayerNorm()(hidden)
         pre_shift, pre_scale, post_scale = jnp.split(gate, 3, -1)
+        intermediate = nn.LayerNorm(use_scale=False, use_bias=False)(hidden)
         intermediate = _modulate(intermediate, pre_shift, pre_scale)
         intermediate = nn.Sequential(
             [
-                nn.Conv(
-                    self.hidden_size,
-                    kernel_size=(1, 1),
-                    strides=(1, 1),
-                    padding="SAME",
-                ),
+                nn.Dense(self.hidden_size * 4),
                 nn.gelu,
                 lambda x: nn.Dropout(self.dropout_rate)(
                     x, deterministic=not is_training
                 ),
-                nn.Conv(
-                    self.hidden_size,
-                    kernel_size=(1, 1),
-                    strides=(1, 1),
-                    padding="SAME",
+                nn.Dense(self.hidden_size),
+                lambda x: nn.Dropout(self.dropout_rate)(
+                    x, deterministic=not is_training
                 ),
             ]
         )(intermediate)
         outputs = hidden + post_scale[:, None] * intermediate
 
         return outputs
-
-
-def _timestep_embedding(timesteps, embedding_dim: int, dtype=jnp.float32):
-    half = embedding_dim // 2
-    freqs = jnp.exp(-jnp.log(10_000) * jnp.arange(0, half) / half)
-    emb = timesteps.astype(dtype)[:, None] * freqs[None, ...]
-    emb = jnp.concatenate([jnp.sin(emb), jnp.cos(emb)], axis=1)
-    return emb
-
-
-def _modulate(inputs, shift, scale):
-    return inputs * (1 + scale[:, None]) + shift[:, None]
 
 
 class DiT(nn.Module):
@@ -71,7 +57,7 @@ class DiT(nn.Module):
     dropout_rate: float = 0.1
 
     def _time_embedding(self, times):
-        times = _timestep_embedding(times, self.n_channels * 2)
+        times = timestep_embedding(times, self.n_channels * 2)
         times = nn.Sequential(
             [
                 nn.Dense(self.n_channels),
@@ -100,13 +86,14 @@ class DiT(nn.Module):
 
     def _unpatchify(self, inputs):
         B, HW, *_ = inputs.shape
-        hw = int(np.sqrt(HW))
+        h = w = int(np.sqrt(HW))
+        p = q = self.patch_size
         hidden = jnp.reshape(
             inputs,
-            (B, self.patch_size, self.patch_size, hw, hw, self.n_out_channels),
+            (B, h, w, p, q, self.n_out_channels),
         )
         outputs = rearrange(
-            hidden, "b p q h w c -> b (h p) (w q) c", h=hw, w=hw
+            hidden, "b h w p q c -> b (h p) (w q) c", h=h, w=w, p=q, q=q
         )
         return outputs
 
@@ -118,7 +105,6 @@ class DiT(nn.Module):
             pos_emb_shape,
             inputs.dtype,
         )
-        patch_embedding = jax.lax.stop_gradient(patch_embedding)
         return inputs + patch_embedding
 
     @nn.compact
@@ -132,19 +118,15 @@ class DiT(nn.Module):
                 hidden, context=times, is_training=is_training
             )
 
-        shift, scale = nn.Sequential(
-            [
-                nn.Dense(
-                    self.n_channels * 2, kernel_init=nn.initializers.zeros
-                ),
-                lambda x: jnp.split(x, 2, -1),
-            ]
+        # final layer
+        times = nn.Dense(
+            self.n_channels * 2, kernel_init=nn.initializers.zeros
         )(times)
-
+        times_shift, times_scale = jnp.split(times, 2, -1)
         hidden = nn.Sequential(
             [
-                nn.LayerNorm(),
-                lambda x: _modulate(x, shift, scale),
+                nn.LayerNorm(use_scale=False, use_bias=False),
+                lambda x: _modulate(x, times_shift, times_scale),
                 nn.Dense(
                     self.patch_size * self.patch_size * self.n_out_channels,
                     kernel_init=nn.initializers.zeros,

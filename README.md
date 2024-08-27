@@ -1,40 +1,48 @@
-# A diffusion transformer implementation in Flax (DiT)
+# DiT
 
 [![status](http://www.repostatus.org/badges/latest/concept.svg)](http://www.repostatus.org/#concept)
-[![ci](https://github.com/dirmeier/dit/actions/workflows/ci.yaml/badge.svg)](https://github.com/dirmeier/dit/actions/workflows/ci.yaml)
-[![codacy]()]()
-[![codacy]()]()
-[![codecov]()]()
-[![version](https://img.shields.io/pypi/v/dit.svg?colorB=black&style=flat)](https://pypi.org/project/dit/)
+[![ci](https://github.com/dirmeier/diffusion-transformer/actions/workflows/ci.yaml/badge.svg)](https://github.com/dirmeier/diffusion-transformer/actions/workflows/ci.yaml)
 
-> A rye package that does nothing so far
+> A diffusion transformer implementation in Flax
 
 ## About
 
-TODO
+This repository implements the diffusion transformer (DiT) architecture
+which has been proposed in [Scalable Diffusion Models with Transformers](https://arxiv.org/abs/2212.09748)
+in Flax. We test the architecture using the EDM parameterization introduced in [Elucidating the Design Space of Diffusion-Based Generative Models](https://arxiv.org/abs/2206.00364).
+
+> [!NOTE]
+> The architecture does not follow the [original implementation](https://github.com/facebookresearch/DiT) exactly.
+> For instance, we don't use label conditioning and just use a learnable positional encoding for the patches.
+> The rest is fairly similar.
 
 ## Example usage
 
-TODO
+The `experiments` folder contains a use case that trains an EDM (diffusion model) on MNIST-SDF.
+To train the model, just execute:
+
+```bash
+cd experiments/mnist_sdf
+python main.py
+  --config=config.py
+  --workdir=<dir>
+  (--usewand)
+```
+
+Below are some samples drawn from the EDM using a DiT-B after training 100 epochs.
+In my experiments, the UNet still works better, but that might just be how the hyperparameters have been chosen.
+
+<div align="center">
+  <img src="experiments/mnist_sdf/figures/sampled-images.png" width="700">
+</div>
 
 ## Installation
 
-To install the latest GitHub <RELEASE>, just call the following on the
-command line:
+To install the latest GitHub <RELEASE>, just call the following on the command line:
 
 ```bash
-pip install git+https://github.com/dirmeier/dit@<RELEASE>
+pip install git+https://github.com/dirmeier/diffusion-transformer@<RELEASE>
 ```
-
-## Contributing
-
-Contributions in the form of pull requests are more than welcome. In order to contribute:
-
-1) fork and download the repository,
-2) create a branch with the name of your new feature (something like `issue/fix-bug-related-to-something` or `feature/implement-new-feature`),
-3) install `dit`
-4) develop code, commit changes and push it to your branch,
-5) submit a pull request :slightly_smiling_face:
 
 ## Author
 

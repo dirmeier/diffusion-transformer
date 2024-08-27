@@ -3,6 +3,7 @@ import os
 
 import jax
 import matplotlib.pyplot as plt
+import optax
 import wandb
 from absl import app, flags, logging
 from checkpointer import get_checkpointer_fns, new_train_state
@@ -11,7 +12,11 @@ from flax.training.early_stopping import EarlyStopping
 from jax import random as jr
 from ml_collections import config_flags
 
-from dit import DenoisingDiffusion, DiT, EDMParameterization
+from dit import (
+    DenoisingDiffusion,
+    DiT,
+    EDMParameterization,
+)
 
 FLAGS = flags.FLAGS
 config_flags.DEFINE_config_file("config", None, "model configuration")
@@ -21,9 +26,8 @@ flags.mark_flags_as_required(["workdir", "config"])
 
 
 def get_model(config):
-    model = DenoisingDiffusion(
-        DiT(**config.score_model.to_dict()), EDMParameterization()
-    )
+    score_model = DiT(**config.dit_score_model.to_dict())
+    model = DenoisingDiffusion(score_model, EDMParameterization())
     return model
 
 
@@ -41,6 +45,12 @@ def step_fn(rngs, state, batch):
 
     loss, grads = jax.value_and_grad(loss_fn)(state.params, rngs)
     new_state = state.apply_gradients(grads=grads)
+    new_ema_params = optax.incremental_update(
+        new_state.params,
+        new_state.ema_params,
+        step_size=1.0 - FLAGS.config.training.ema_rate,
+    )
+    new_state = new_state.replace(ema_params=new_ema_params)
     return loss, new_state
 
 
@@ -81,7 +91,7 @@ def train(rng_key, model, config, train_iter, val_iter, model_id):
     state = new_train_state(
         state_key, model, next(iter(train_iter)), config.optimizer
     )
-    ckpt_save_fn, ckpt_restore_fn, _ = get_checkpointer_fns(
+    ckpt_save_fn, *_ = get_checkpointer_fns(
         os.path.join(FLAGS.workdir, "checkpoints", model_id),
         config.training.checkpoints,
         config.model.to_dict(),
@@ -97,19 +107,19 @@ def train(rng_key, model, config, train_iter, val_iter, model_id):
         train_key, val_key, sample_key = jr.split(
             jr.fold_in(epoch_key, epoch), 3
         )
-        # train_loss, state = train_epoch(train_key, state, train_iter)
-        # val_loss = evaluate_model(val_key, state, val_iter)
-        # logging.info(f"loss at epoch {epoch}: {train_loss}/{val_loss}")
-        # ckpt_save_fn(
-        #     epoch,
-        #     state,
-        #     {"train_loss": train_loss, "val_loss": val_loss},
-        # )
-        # early_stop.update(val_loss)
-        # if FLAGS.usewand:
-        #     wandb.log({"loss": train_loss, "val_loss": val_loss})
-        # #if FLAGS.usewand and epoch % 1 == 0:
-        log_images(sample_key, state, epoch, model_id)
+        train_loss, state = train_epoch(train_key, state, train_iter)
+        val_loss = evaluate_model(val_key, state, val_iter)
+        logging.info(f"loss at epoch {epoch}: {train_loss}/{val_loss}")
+        ckpt_save_fn(
+            epoch,
+            state,
+            {"train_loss": train_loss, "val_loss": val_loss},
+        )
+        early_stop.update(val_loss)
+        if FLAGS.usewand:
+            wandb.log({"train_loss": train_loss, "val_loss": val_loss})
+        if FLAGS.usewand and epoch % 25 == 0:
+            log_images(sample_key, state, epoch, model_id)
         if early_stop.should_stop:
             logging.info("early stopping criterion found. stopping training")
             break
@@ -117,11 +127,12 @@ def train(rng_key, model, config, train_iter, val_iter, model_id):
 
 @jax.jit
 def sample(rng_key, state):
+    # We use the EMA params for sampling
     ret = state.apply_fn(
-        variables={"params": state.params},
+        variables={"params": state.ema_params},
         rngs={"sample": rng_key},
         method="sample",
-        sample_shape=(32, 32, 32, 3),
+        sample_shape=(64, 32, 32, 1),
         is_training=False,
     )
     return ret
@@ -130,16 +141,28 @@ def sample(rng_key, state):
 def plot_figures(samples):
     def convert_batch_to_image_grid(image_batch):
         reshaped = (
-            image_batch.reshape(4, 8, 32, 32, 3)
+            image_batch.reshape(4, 8, 32, 32, 1)
             .transpose([0, 2, 1, 3, 4])
-            .reshape(4 * 32, 8 * 32, 3)
+            .reshape(4 * 32, 8 * 32, 1)
         )
         # undo intitial scaling, i.e., map [-1, 1] -> [0, 1]
         return reshaped / 2.0 + 0.5
 
-    fig, ax = plt.subplots(figsize=(8, 4))
-    ax.imshow(convert_batch_to_image_grid(samples), interpolation="nearest")
-    ax.set_title("samples")
+    fig = plt.figure(figsize=(16, 4))
+    ax = fig.add_subplot(1, 2, 1)
+    ax.imshow(
+        convert_batch_to_image_grid(samples[:32]),
+        interpolation="nearest",
+        cmap="gray",
+    )
+    plt.axis("off")
+    plt.tight_layout()
+    ax = fig.add_subplot(1, 2, 2)
+    ax.imshow(
+        convert_batch_to_image_grid(samples[32:]),
+        interpolation="nearest",
+        cmap="gray",
+    )
     plt.axis("off")
     plt.tight_layout()
     return fig

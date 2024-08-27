@@ -180,6 +180,7 @@ packaging==24.1
     # via tensorflow
 pillow==10.4.0
     # via matplotlib
+pip==24.2
 platformdirs==4.2.2
     # via virtualenv
     # via wandb

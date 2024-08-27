@@ -1,12 +1,18 @@
 import os
 import pickle
+from typing import Any
 
 import optax
 import orbax.checkpoint
+from flax import core, struct
 from flax.training import orbax_utils
 from flax.training.train_state import TrainState
 from jax import random as jr
 from orbax.checkpoint.utils import get_save_directory
+
+
+class EMATrainState(TrainState):
+    ema_params: core.FrozenDict[str, Any] = struct.field(pytree_node=True)
 
 
 def new_train_state(rng_key, model, init_batch, config):
@@ -40,15 +46,20 @@ def new_train_state(rng_key, model, init_batch, config):
     else:
         lr = config.params.learning_rate
 
-    tx = optax.adamw(lr, weight_decay=config.params.weight_decay)
+    if config.name == "adamw":
+        tx = optax.adamw(lr, weight_decay=config.params.weight_decay)
+    else:
+        tx = optax.adam(lr)
+
     if config.params.do_gradient_clipping:
         tx = optax.chain(
             optax.clip_by_global_norm(config.params.gradient_clipping), tx
         )
 
-    return TrainState.create(
+    return EMATrainState.create(
         apply_fn=model.apply,
         params=variables["params"],
+        ema_params=variables["params"].copy(),
         tx=tx,
     )
 
