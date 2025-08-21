@@ -1,9 +1,6 @@
 # DiT
 
-[![status](http://www.repostatus.org/badges/latest/concept.svg)](http://www.repostatus.org/#concept)
 [![ci](https://github.com/dirmeier/diffusion-transformer/actions/workflows/ci.yaml/badge.svg)](https://github.com/dirmeier/diffusion-transformer/actions/workflows/ci.yaml)
-
-> A diffusion transformer implementation in Flax
 
 ## About
 
@@ -19,6 +16,13 @@ in Flax. We test the architecture using the EDM parameterization introduced in [
 ## Example usage
 
 The `experiments` folder contains a use case that trains an EDM (diffusion model) on MNIST-SDF.
+First download the latest release and install all dependencies via:
+
+```bash
+wget -qO- https://github.com/dirmeier/diffusion-transformer/archive/refs/tags/<TAG>>.tar.gz | tar zxvf -
+uv sync --all-groups
+```
+
 To train the model, just execute:
 
 ```bash
@@ -41,9 +45,9 @@ In my experiments, the UNet still works better, but that might just be how the h
 To install the latest GitHub <RELEASE>, just call the following on the command line:
 
 ```bash
-pip install git+https://github.com/dirmeier/diffusion-transformer@<RELEASE>
+pip install git+https://github.com/dirmeier/diffusion-transformer@<TAG>
 ```
 
 ## Author
 
-Simon Dirmeier <a href="mailto:sfyrbnd @ pm me">sfyrbnd @ pm me</a>
+Simon Dirmeier <a href="mailto:simd23@pm.me">simd23 @ pm dot me</a>
